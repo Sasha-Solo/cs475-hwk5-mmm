@@ -9,30 +9,29 @@
 * Global defs
 */
 int size; //for keeping track of size
-double** partialMult; //array partialMult for partial results by threads
-double** tempOutput; //array for temporarily storing results of mmm_par
+double** partialMult; //array partialMult
 
 int main(int argc, char *argv[]) {
 	double clockstart, clockend;
 	int numThreads; //for keeping track of thread count
-	double firstTimeTaken = 0.0;
+	double pfirstTimeTaken = 0.0;
+	double sfirstTimeTaken = 0.0;
 	double ptimeTaken = 0.0;
 	double stimeTaken = 0.0;
 
-
 	if ((argc == 3 && strcmp(argv[1], "P") == 0) || argc > 4 || argc < 3) { //we are using ./mmm incorrectly
-		printf("Use: ./mmm S <size> or /mmm P <threads> <size>\n");
+		printf("Use: ./mmm S <size> or /mmm P <threads> <size>");
 		return 0;
 	}
 	else if (argc == 4){ //if we type in 4 things, mode P (./mmm P <threads> <size>)
 		//deal with possible errors with use of ./mmm:
 		sscanf(argv[2], "%d", &numThreads);
 		if (numThreads <= 0){
-			printf("Number of threads should be positive.\n");
+			printf("\nNumber of threads should be positive.\n");
 			return 0;
 		}
 		sscanf(argv[3], "%d", &size);
-		if (numThreads > size){ // || numThreads == size
+		if (numThreads > size || numThreads == size){
 			printf("\nNumber of threads must be less than size %d.\n", size);
 			return 0;
 		}
@@ -42,16 +41,10 @@ int main(int argc, char *argv[]) {
 		}
 		printf("========\nmode: parallel\n");
 		printf("thread count: %d\n", numThreads);
-		printf("size: %d\n========\n", size);
+		printf("size: %d\n========", size);
 
-		mmm_init(); //allocate space and initialize matrices
-
-		tempOutput = (double**) malloc(sizeof(double*) * size); //space for array temp
-		for (int i = 0; i < size; i++) {
-      		tempOutput[i] = (double*) malloc(sizeof(double) * size);
-		}
-
-		for (int i = 0; i < 4; i++){ //run parallel version 4 times
+		for (int i = 0; i < 4; i++){ //run par version 4 times
+			mmm_init(); //allocate space and initialize matrices
 			clockstart = rtclock(); // start clocking
 
 			//malloc an for partialMult where the partial results will be stored
@@ -64,10 +57,14 @@ int main(int argc, char *argv[]) {
 			threadArgs *args = (threadArgs*) malloc(numThreads * sizeof(threadArgs));
 
 			//initialize input arguments from struct
+			//printf("numT = %d \n", numThreads);
 			for (int i = 0; i < numThreads; i++){
 				args[i].tid = i;
 				args[i].start = (i * size / numThreads + 1) - 1;
+			//args[i].start = start - 1;
 				args[i].end = (i + 1) * size / numThreads;
+			//args[i].end = end;
+			//printf("thread #: %d, begin: %ld, end: %ld\n", args[i].tid, args[i].start, args[i].end);
 			}
 		
 			// allocate space to hold threads
@@ -87,65 +84,51 @@ int main(int argc, char *argv[]) {
 				}	
 			}
 
-			free(args);
-			args = NULL;
-			free(threads);
-			threads = NULL;
-
 			clockend = rtclock(); // stop clocking
 
-			//put outputMatrix into tempOutput
-			for (int i = 0; i < size; i++) {
-				for (int j = 0; j < size; j++){
-					tempOutput[i][j] = outputMatrix[i][j];
-				}
+			if (i == 0){
+				pfirstTimeTaken = (clockend - clockstart);
 			}
+			ptimeTaken = ptimeTaken + (clockend-clockstart);
 
+			mmm_reset(matrix1);
+			mmm_reset(matrix2);
+		}
+
+		ptimeTaken = (ptimeTaken - pfirstTimeTaken)/3.0;
+		printf("\nParallel Time (avg of 3 runs): %.6f sec\n", ptimeTaken);
+
+		//printf("\nTime taken: %.6f sec\n", (clockend - clockstart));
+			mmm_freeup(); //free everything
 			for (int i = 0; i < size; i++) { //free each row in matrix2
     			free(partialMult[i]);
     			partialMult[i] = NULL;  //remove dangling pointer
 			}
-
 			//free everything else
 			free(partialMult);
 			partialMult = NULL;
+			free(args);
+			args = NULL;
 
-			if (i == 0){
-				firstTimeTaken = (clockend - clockstart);
-			}
-			ptimeTaken = ptimeTaken + (clockend-clockstart);
-		}
-		mmm_reset(outputMatrix);
-		
-		//time for par
-		ptimeTaken = (ptimeTaken - firstTimeTaken)/3.0;
-		
 		for (int i = 0; i < 4; i++){ //run seq version 4 times
+			mmm_init(); //allocate space and initialize matrices
 			clockstart = rtclock(); // start clocking
 			mmm_seq();
 			clockend = rtclock(); // stop clocking
-			
+			//printf("\ns time taken: %.6f sec\n", (clockend - clockstart));
+			mmm_freeup(); //free everything
 			if (i == 0){
-				firstTimeTaken = (clockend - clockstart);
+				sfirstTimeTaken = (clockend - clockstart);
 			}
 			stimeTaken = stimeTaken + (clockend-clockstart);
 		}
 
-		//time for seq
-		stimeTaken = (stimeTaken - firstTimeTaken)/ 3.0;
+		stimeTaken = (stimeTaken - sfirstTimeTaken)/ 3.0;
+		//printf("firstTime : %.6f", firstTimeTaken);
 		printf("Sequential Time (avg of 3 runs): %.6f sec\n", stimeTaken);
-		printf("Parallel Time (avg of 3 runs): %.6f sec\n", ptimeTaken);
-		printf("Speedup: %.6f\n", (stimeTaken/ptimeTaken));
-		double maxDiff = mmm_verify();
-		printf("Verifying...largest error between parallel and sequential matrix: %f\n", maxDiff);
+		printf("Speedup: %.6f\n", (ptimeTaken/stimeTaken));
+		//mmm_verify();
 
-		mmm_freeup(); //free everything
-		for (int i = 0; i < size; i++) { //free each row in tempOutput
-    			free(tempOutput[i]);
-    			tempOutput[i] = NULL;  //remove dangling pointer
-			}
-		free(tempOutput);
-		tempOutput = NULL;
 	}
 	else if (argc == 3){ //3 things is mode S, ./mmm S <size>
 		printf("========\nmode: sequential\n");
@@ -162,16 +145,23 @@ int main(int argc, char *argv[]) {
 			clockstart = rtclock(); // start clocking
 			mmm_seq();
 			clockend = rtclock(); // stop clocking
+			//printf("\nTime taken: %.6f sec\n", (clockend - clockstart));
 			mmm_freeup(); //free everything
 
 			if (i == 0){
-				firstTimeTaken = (clockend - clockstart);
+				sfirstTimeTaken = (clockend - clockstart);
 			}
 			stimeTaken = stimeTaken + (clockend-clockstart);
 		}
 
-		stimeTaken = (stimeTaken - firstTimeTaken)/ 3.0;
+		stimeTaken = (stimeTaken - sfirstTimeTaken)/ 3.0;
+		//printf("firstTime : %.6f", firstTimeTaken);
 		printf("\nSequential Time (avg of 3 runs): %.6f sec\n", stimeTaken);
+		//printf("Speedup: %.6f\n", (ptimeTaken/stimeTaken));
+		//mmm_verify();
+
+	
+
 	}
 
 	return 0;
